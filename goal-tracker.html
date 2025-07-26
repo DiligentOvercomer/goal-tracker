@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Goal & Skill Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.2/dist/dexie.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    };
+  </script>
+  <style>
+    .icon-btn {
+      transition: transform 0.1s, box-shadow 0.2s;
+      border-radius: 0.375rem;
+      padding: 0.25rem 0.5rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .icon-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+      background: rgba(0,0,0,0.03);
+    }
+    .drag-handle {
+      cursor: grab;
+      padding: 0.25rem;
+      margin-right: 0.5rem;
+      display: inline-flex;
+      align-items: center;
+      opacity: 0.7;
+    }
+    #dashboard {
+      background: linear-gradient(90deg, #86efac40 0%, #38bdf840 100%);
+    }
+    input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 2px #60a5fa40;
+    }
+  </style>
+</head>
+
+<body class="bg-gradient-to-br from-green-100 via-blue-100 to-purple-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 text-gray-900 dark:text-gray-100 p-4 min-h-screen">
+  <div class="max-w-5xl mx-auto">
+    <div class="flex justify-between items-center mb-6">
+      <div class="flex items-center gap-2">
+        <!-- Marksman/Target Icon -->
+        <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" stroke-width="2"
+          viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="2" fill="currentColor"/>
+          <line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="2"/>
+          <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2"/>
+          <line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="2"/>
+          <line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <h1 class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-green-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">Goal & Skill Tracker</h1>
+      </div>
+      <button onclick="toggleTheme()" class="icon-btn bg-gray-800 text-white dark:bg-gray-700 dark:text-white" title="Toggle Theme">
+        <svg id="theme-icon" class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+          viewBox="0 0 24 24">
+          <path d="M21 12.79A9 9 0 0112.21 3a9 9 0 100 18 9 9 0 008.79-8.21z" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </button>
+    </div>
+
+    <div id="dashboard" class="bg-white dark:bg-gray-800 p-4 rounded-xl shadow mb-4 flex justify-between font-semibold text-lg"></div>
+
+    <div class="mb-4 flex flex-wrap gap-2 items-center bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+      <input id="new-goal-name" type="text" placeholder="New Goal Name" class="border p-2 w-60 rounded bg-gray-50 dark:bg-gray-900" />
+      <button onclick="addGoal()" class="icon-btn bg-green-100 text-green-700 hover:bg-green-200" title="Add Goal">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+          viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path stroke="currentColor" stroke-width="2" d="M12 8v8m-4-4h8"/>
+        </svg>
+      </button>
+      <!-- Export Data Icon: File Out -->
+      <button onclick="exportData()" class="icon-btn bg-yellow-100 text-yellow-700 hover:bg-yellow-200" title="Export Data">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+          viewBox="0 0 24 24">
+          <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 14v-8m0 0l-3 3m3-3l3 3" stroke="currentColor" stroke-width="2" fill="none"/>
+        </svg>
+      </button>
+      <input type="file" id="import-file" class="hidden" onchange="importData(event)" />
+      <!-- Import Data Icon: File In -->
+      <button onclick="document.getElementById('import-file').click()" class="icon-btn bg-green-100 text-green-700 hover:bg-green-200" title="Import Data">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+          viewBox="0 0 24 24">
+          <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 10v8m0 0l-3-3m3 3l3-3" stroke="currentColor" stroke-width="2" fill="none"/>
+        </svg>
+      </button>
+    </div>
+
+    <div id="status" class="mb-4 text-sm"></div>
+    <div id="goals-container" class="space-y-8"></div>
+  </div>
+
+  <script>
+    let db;
+    try {
+      // Version 3 schema: Add 'order' field to all tables
+      db = new Dexie("GoalSkillTrackerDB");
+      db.version(3).stores({
+        goals: "++id,name,order",
+        skills: "++id,goalId,name,completed,order",
+        subskills: "++id,skillId,name,completed,order"
+      });
+      db.version(2).stores({
+        // fallback for migration
+        goals: "++id,name,order",
+        skills: "++id,goalId,name,completed,order",
+        subskills: "++id,skillId,name,completed,order"
+      });
+      db.version(1).stores({
+        goals: "++id,name",
+        skills: "++id,goalId,name,completed",
+        subskills: "++id,skillId,name,completed"
+      });
+    } catch {
+      notify("Error initializing database", true);
+    }
+
+    // Migration: Add order property if missing
+    async function migrateOrderFields() {
+      // For goals
+      const goals = await db.goals.toArray();
+      let changed = false;
+      for (let i = 0; i < goals.length; i++) {
+        if (typeof goals[i].order !== "number") {
+          await db.goals.update(goals[i].id, { order: i });
+          changed = true;
+        }
+      }
+      // For skills
+      const skills = await db.skills.toArray();
+      for (let i = 0; i < skills.length; i++) {
+        if (typeof skills[i].order !== "number") {
+          await db.skills.update(skills[i].id, { order: i });
+          changed = true;
+        }
+      }
+      // For subskills
+      const subskills = await db.subskills.toArray();
+      for (let i = 0; i < subskills.length; i++) {
+        if (typeof subskills[i].order !== "number") {
+          await db.subskills.update(subskills[i].id, { order: i });
+          changed = true;
+        }
+      }
+      if (changed) notify("Order fields migrated");
+    }
+
+    const notify = (msg, err = false) => {
+      const el = document.getElementById("status");
+      el.innerText = msg;
+      el.className = err ? "text-red-500 mb-4" : "text-green-600 mb-4";
+      setTimeout(() => (el.innerText = ""), 3000);
+    };
+
+    const toggleTheme = () => {
+      document.documentElement.classList.toggle("dark");
+      updateThemeIcon();
+    };
+
+    function updateThemeIcon() {
+      const icon = document.getElementById("theme-icon");
+      if (document.documentElement.classList.contains('dark')) {
+        icon.innerHTML = `<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M21 12.79A9 9 0 0112.21 3a9 9 0 100 18 9 9 0 008.79-8.21z" stroke="currentColor" stroke-width="2"/>`
+      } else {
+        icon.innerHTML = `<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 2v2m0 16v2m10-10h-2M4 12H2m16.95 4.95l-1.414-1.414M6.364 6.364L4.95 4.95m12.02 0l-1.414 1.414M6.364 17.636l-1.414 1.414"/>`
+      }
+    }
+
+    async function addGoal() {
+      const name = document.getElementById("new-goal-name").value.trim();
+      if (!name) return;
+      const count = await db.goals.count();
+      await db.goals.add({ name, order: count });
+      document.getElementById("new-goal-name").value = "";
+      notify("Goal added");
+      render();
+    }
+
+    async function editGoal(id) {
+      const name = prompt("Edit goal name:");
+      if (name) {
+        await db.goals.update(id, { name });
+        notify("Goal updated");
+        render();
+      }
+    }
+
+    async function deleteGoal(id) {
+      if (confirm("Delete this goal and all its skills?")) {
+        const skills = await db.skills.where("goalId").equals(id).toArray();
+        for (const s of skills) {
+          await db.subskills.where("skillId").equals(s.id).delete();
+        }
+        await db.skills.where("goalId").equals(id).delete();
+        await db.goals.delete(id);
+        notify("Goal deleted");
+        render();
+      }
+    }
+
+    async function addSkill(goalId) {
+      const name = prompt("Enter skill name:");
+      if (name) {
+        const count = await db.skills.where("goalId").equals(goalId).count();
+        await db.skills.add({ goalId, name, completed: false, order: count });
+        notify("Skill added");
+        render();
+      }
+    }
+
+    async function toggleSkill(id) {
+      const subskills = await db.subskills.where("skillId").equals(id).toArray();
+      if (subskills.length) {
+        const allChecked = subskills.every(s => s.completed);
+        for (const s of subskills) {
+          await db.subskills.update(s.id, { completed: !allChecked });
+        }
+        await db.skills.update(id, { completed: !allChecked });
+      } else {
+        const skill = await db.skills.get(id);
+        await db.skills.update(id, { completed: !skill.completed });
+      }
+      render();
+    }
+
+    async function editSkill(id) {
+      const name = prompt("Edit skill name:");
+      if (name) {
+        await db.skills.update(id, { name });
+        notify("Skill updated");
+        render();
+      }
+    }
+
+    async function deleteSkill(id) {
+      if (confirm("Delete this skill and its subskills?")) {
+        await db.subskills.where("skillId").equals(id).delete();
+        await db.skills.delete(id);
+        notify("Skill deleted");
+        render();
+      }
+    }
+
+    async function addSubskill(skillId) {
+      const name = prompt("Enter subskill name:");
+      if (name) {
+        const count = await db.subskills.where("skillId").equals(skillId).count();
+        await db.subskills.add({ skillId, name, completed: false, order: count });
+        notify("Subskill added");
+        render();
+      }
+    }
+
+    async function toggleSubskill(id, skillId) {
+      const sub = await db.subskills.get(id);
+      await db.subskills.update(id, { completed: !sub.completed });
+      const all = await db.subskills.where("skillId").equals(skillId).toArray();
+      const complete = all.every(s => s.completed);
+      await db.skills.update(skillId, { completed: complete });
+      render();
+    }
+
+    async function editSubskill(id) {
+      const name = prompt("Edit subskill name:");
+      if (name) {
+        await db.subskills.update(id, { name });
+        notify("Subskill updated");
+        render();
+      }
+    }
+
+    async function deleteSubskill(id) {
+      if (confirm("Delete this subskill?")) {
+        await db.subskills.delete(id);
+        notify("Subskill deleted");
+        render();
+      }
+    }
+
+    async function exportData() {
+      const data = {
+        goals: await db.goals.toArray(),
+        skills: await db.skills.toArray(),
+        subskills: await db.subskills.toArray()
+      };
+      const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "goals_backup.json";
+      a.click();
+    }
+
+    async function importData(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await db.goals.clear();
+      await db.skills.clear();
+      await db.subskills.clear();
+      // If imported data has no order, assign by index
+      data.goals.forEach((g, i) => { if (typeof g.order !== "number") g.order = i; });
+      data.skills.forEach((s, i) => { if (typeof s.order !== "number") s.order = i; });
+      data.subskills.forEach((s, i) => { if (typeof s.order !== "number") s.order = i; });
+      await db.goals.bulkAdd(data.goals);
+      await db.skills.bulkAdd(data.skills);
+      await db.subskills.bulkAdd(data.subskills);
+      notify("Data imported");
+      render();
+    }
+
+    // Render logic for drag-and-drop enabled lists
+    async function render() {
+      await migrateOrderFields(); // Ensure order fields exist
+
+      const container = document.getElementById("goals-container");
+      container.innerHTML = "";
+
+      let goals = await db.goals.orderBy('order').toArray();
+      let totalSkills = 0, totalCompleted = 0;
+
+      for (const goal of goals) {
+        const goalEl = document.createElement("div");
+        goalEl.className = "bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-green-200 dark:border-gray-700";
+        goalEl.setAttribute('data-goal-id', goal.id);
+
+        let skills = await db.skills.where("goalId").equals(goal.id).toArray();
+        skills = skills.sort((a, b) => a.order - b.order);
+
+        let goalTotal = 0, goalDone = 0;
+
+        // Skills List Element
+        const skillsList = document.createElement("ul");
+        skillsList.className = "mb-2";
+        skillsList.setAttribute('id', `skills-list-${goal.id}`);
+
+        for (const skill of skills) {
+          let subs = await db.subskills.where("skillId").equals(skill.id).toArray();
+          subs = subs.sort((a, b) => a.order - b.order);
+          const checked = subs.length ? subs.filter(s => s.completed).length : (skill.completed ? 1 : 0);
+          const total = subs.length || 1;
+          goalTotal += total;
+          goalDone += checked;
+
+          // Subskills List Element
+          const subList = document.createElement("ul");
+          subList.className = "ml-6 mt-1";
+          subList.setAttribute('id', `subskills-list-${skill.id}`);
+
+          for (const s of subs) {
+            const subItem = document.createElement("li");
+            subItem.className = "flex justify-between items-center text-sm py-1";
+            subItem.setAttribute('data-subskill-id', s.id);
+
+            subItem.innerHTML = `
+              <span class="${s.completed ? 'line-through text-gray-400' : ''} flex items-center">
+                <span class="drag-handle" title="Drag to reorder">
+                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <circle cx="6" cy="6" r="1.5"/><circle cx="18" cy="6" r="1.5"/><circle cx="6" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>
+                  </svg>
+                </span>
+                <input type="checkbox" ${s.completed ? 'checked' : ''} onchange="toggleSubskill(${s.id}, ${skill.id})" class="mr-2 accent-green-500">${s.name}
+              </span>
+              <span class="flex gap-1">
+                <button onclick="editSubskill(${s.id})" class="icon-btn bg-blue-100 text-blue-600 hover:bg-blue-200" title="Edit Subskill">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24"><path d="M12 20h9" stroke="currentColor" stroke-width="2"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19.5l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+                <button onclick="deleteSubskill(${s.id})" class="icon-btn bg-red-100 text-red-600 hover:bg-red-200" title="Delete Subskill">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24"><path d="M3 6h18" stroke="currentColor" stroke-width="2"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+              </span>
+            `;
+            subList.appendChild(subItem);
+          }
+
+          // Skill Item
+          const skillItem = document.createElement("li");
+          skillItem.className = "mb-2 rounded-lg bg-gray-50 dark:bg-gray-900 shadow-sm p-2";
+          skillItem.setAttribute('data-skill-id', skill.id);
+
+          skillItem.innerHTML = `
+            <div class="flex justify-between items-center">
+              <span class="${skill.completed ? 'line-through text-gray-500' : ''} flex items-center">
+                <span class="drag-handle" title="Drag to reorder">
+                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <circle cx="6" cy="6" r="1.5"/><circle cx="18" cy="6" r="1.5"/><circle cx="6" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>
+                  </svg>
+                </span>
+                <input type="checkbox" ${skill.completed ? 'checked' : ''} onchange="toggleSkill(${skill.id})" class="mr-2 accent-blue-500">${skill.name}
+              </span>
+              <span class="flex gap-1">
+                <button onclick="editSkill(${skill.id})" class="icon-btn bg-blue-100 text-blue-600 hover:bg-blue-200" title="Edit Skill">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24"><path d="M12 20h9" stroke="currentColor" stroke-width="2"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19.5l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+                <button onclick="deleteSkill(${skill.id})" class="icon-btn bg-red-100 text-red-600 hover:bg-red-200" title="Delete Skill">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24"><path d="M3 6h18" stroke="currentColor" stroke-width="2"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+                <button onclick="addSubskill(${skill.id})" class="icon-btn bg-green-100 text-green-600 hover:bg-green-200" title="Add Subskill">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                    <path stroke="currentColor" stroke-width="2" d="M12 8v8m-4-4h8"/>
+                  </svg>
+                </button>
+              </span>
+            </div>
+          `;
+          skillItem.appendChild(subList);
+          skillsList.appendChild(skillItem);
+        }
+
+        const percent = goalTotal ? Math.round((goalDone / goalTotal) * 100) : 0;
+        totalSkills += goalTotal;
+        totalCompleted += goalDone;
+
+        // Goal Header
+        goalEl.innerHTML = `
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="drag-handle" title="Drag to reorder">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <circle cx="6" cy="6" r="1.5"/><circle cx="18" cy="6" r="1.5"/><circle cx="6" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>
+                </svg>
+              </span>
+              <!-- Marksman/Target Icon for each goal -->
+              <svg class="w-7 h-7 text-green-400" fill="none" stroke="currentColor" stroke-width="2"
+                viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                <circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="2"/>
+                <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                <line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="2"/>
+                <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2"/>
+                <line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="2"/>
+                <line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="2"/>
+              </svg>
+              <h2 class="text-xl font-bold bg-gradient-to-r from-blue-400 via-green-400 to-purple-500 bg-clip-text text-transparent">${goal.name}</h2>
+            </div>
+            <div class="flex gap-1">
+              <button onclick="editGoal(${goal.id})" class="icon-btn bg-blue-100 text-blue-600 hover:bg-blue-200" title="Edit Goal">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+                  viewBox="0 0 24 24"><path d="M12 20h9" stroke="currentColor" stroke-width="2"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19.5l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2"/></svg>
+              </button>
+              <button onclick="deleteGoal(${goal.id})" class="icon-btn bg-red-100 text-red-600 hover:bg-red-200" title="Delete Goal">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+                  viewBox="0 0 24 24"><path d="M3 6h18" stroke="currentColor" stroke-width="2"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6" stroke="currentColor" stroke-width="2"/></svg>
+              </button>
+              <!-- Add Skill button placed here to the right of Delete Goal -->
+              <button onclick="addSkill(${goal.id})" class="icon-btn bg-green-100 text-green-600 hover:bg-green-200" title="Add Skill">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2"
+                  viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                  <path stroke="currentColor" stroke-width="2" d="M12 8v8m-4-4h8"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="bg-gray-200 dark:bg-gray-600 h-4 rounded mb-2 overflow-hidden shadow-inner">
+            <div class="bg-gradient-to-r from-green-400 via-blue-400 to-purple-400 h-4 rounded transition-all duration-300" style="width: ${percent}%"></div>
+          </div>
+          <p class="mb-2 text-gray-700 dark:text-gray-300 font-medium">${percent}% complete</p>
+        `;
+        goalEl.appendChild(skillsList);
+        container.appendChild(goalEl);
+      }
+
+      const overall = totalSkills ? Math.round((totalCompleted / totalSkills) * 100) : 0;
+      document.getElementById("dashboard").innerHTML = `
+        <div class="flex items-center gap-2">
+          <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" stroke-width="2"
+            viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/></svg>
+          <span>Total Goals: <strong>${goals.length}</strong></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" stroke-width="2"
+            viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke="currentColor" stroke-width="2"/></svg>
+          <span>Overall Progress: <strong>${overall}%</strong></span>
+        </div>
+      `;
+      updateThemeIcon();
+      setupSortables();
+    }
+
+    // Setup SortableJS for goals, skills, and subskills
+    async function setupSortables() {
+      // Goals
+      new Sortable(document.getElementById('goals-container'), {
+        animation: 150,
+        handle: '.drag-handle',
+        draggable: 'div[data-goal-id]',
+        onEnd: async function (evt) {
+          const items = Array.from(document.querySelectorAll('#goals-container > div[data-goal-id]'));
+          for (let i = 0; i < items.length; i++) {
+            const goalId = items[i].getAttribute('data-goal-id');
+            await db.goals.update(Number(goalId), { order: i });
+          }
+          render();
+        }
+      });
+      // Skills & Subskills for each goal/skill
+      const goals = await db.goals.toArray();
+      for (const goal of goals) {
+        const skillsList = document.getElementById(`skills-list-${goal.id}`);
+        if (skillsList) {
+          new Sortable(skillsList, {
+            animation: 150,
+            handle: '.drag-handle',
+            draggable: 'li[data-skill-id]',
+            onEnd: async function (evt) {
+              const items = Array.from(skillsList.querySelectorAll('li[data-skill-id]'));
+              for (let i = 0; i < items.length; i++) {
+                const skillId = items[i].getAttribute('data-skill-id');
+                await db.skills.update(Number(skillId), { order: i });
+              }
+              render();
+            }
+          });
+          // Subskills for each skill
+          const skills = await db.skills.where("goalId").equals(goal.id).toArray();
+          for (const skill of skills) {
+            const subList = document.getElementById(`subskills-list-${skill.id}`);
+            if (subList) {
+              new Sortable(subList, {
+                animation: 150,
+                handle: '.drag-handle',
+                draggable: 'li[data-subskill-id]',
+                onEnd: async function (evt) {
+                  const items = Array.from(subList.querySelectorAll('li[data-subskill-id]'));
+                  for (let i = 0; i < items.length; i++) {
+                    const subId = items[i].getAttribute('data-subskill-id');
+                    await db.subskills.update(Number(subId), { order: i });
+                  }
+                  render();
+                }
+              });
+            }
+          }
+        }
+      }
+    }
+
+    render();
+  </script>
+</body>
+
+</html>
